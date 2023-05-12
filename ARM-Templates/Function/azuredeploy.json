@@ -31,10 +31,10 @@
             }
         },
         "NewOrExistingAppServicePlan": {
-            "defaultValue": "New App Service Plan",
+            "defaultValue": "New",
             "allowedValues": [
-                "New App Service Plan",
-                "Existing App Service Plan"
+                "New",
+                "Existing"
             ],
             "type": "String",
             "metadata": {
@@ -84,8 +84,8 @@
     "variables": {
         "functionStorageAccountName": "[concat(uniquestring(parameters('functionAppName')), 'fnappstrg')]",
         "eventSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'))]",
-        "appServiceSKU":"[if(equals(parameters('appServicePlanType'),'Consumption Plan'),'Y1','EP1')]",
-        "appPlanResourceId": "[if(equals(parameters('NewOrExistingAppServicePlan'), 'New App Service Plan',[resourceId('Microsoft.Web/serverfarms',concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan'))], parameters('existingAppServicePlanResourceId')"
+        "appServiceSKU":"[if(equals(parameters('newAppServicePlanType'),'Consumption Plan'),'Y1','EP1')]",
+        "appPlanResourceId": "[if(equals(parameters('NewOrExistingAppServicePlan'), 'New',[resourceId('Microsoft.Web/serverfarms',concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan'))], parameters('existingAppServicePlanResourceId')"
     },
     "resources": [
         {
@@ -101,7 +101,7 @@
         },
         {
             "type": "Microsoft.Web/serverfarms",
-            "condition": "[if(equals(parameters('NewOrExistingAppServicePlan'), 'New App Service Plan', true,false]",
+            "condition": "[equals(parameters('NewOrExistingAppServicePlan'), 'New')]",
             "apiVersion": "2022-03-01",
             "name": "[concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan')]",
             "location": "[resourceGroup().location]",
