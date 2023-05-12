@@ -10,7 +10,7 @@
             }
         },
         "NewOrExistingAppServicePlan": {
-            "defaultValue": "Consumption Plan",
+            "defaultValue": "New App Service Plan",
             "allowedValues": [
                 "New App Service Plan",
                 "Existing App Service Plan"
