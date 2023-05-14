@@ -199,9 +199,9 @@
                         },
                         {
                             "type": "Microsoft.KeyVault/vaults/providers/eventSubscriptions",
-                            "apiVersion": "2020-01-01-preview",
+                            "apiVersion": "2023-06-01-preview",
                             "name": "[concat(variables('keyVaultName'),'/Microsoft.EventGrid/',variables('eventSubscriptionName'))]",
-                            "location": "[resourceGroup().location]",
+                            "location": "centraluseuap",
                             "properties": {
                                 "destination": {
                                     "endpointType": "AzureFunction",
