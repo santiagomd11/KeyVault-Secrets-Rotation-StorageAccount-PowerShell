@@ -193,7 +193,7 @@
         {
             "name": "kv-event-subscription-and-grant-access",
             "type": "Microsoft.Resources/deployments",
-            "apiVersion": "2019-10-01",
+            "apiVersion": "2022-09-01",
             "subscriptionId": "[subscription().subscriptionId]",
             "resourceGroup": "[parameters('keyVaultRG')]",
             "dependsOn": [
@@ -256,7 +256,7 @@
 
             "name": "grant-access",
             "type": "Microsoft.Resources/deployments",
-            "apiVersion": "2019-10-01",
+            "apiVersion": "2022-09-01",
             "subscriptionId": "[subscription().subscriptionId]",
             "resourceGroup": "[parameters('StorageAccountRG')]",
             "dependsOn": [
