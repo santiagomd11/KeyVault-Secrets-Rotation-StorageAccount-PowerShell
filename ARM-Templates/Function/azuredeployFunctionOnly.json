@@ -10,7 +10,7 @@
             }
         },
         "keyVaultResourceId": {
-            "defaultValue": "/subscriptions/9ddb6ca6-f086-4796-8c53-ea831f1df369/resourceGroups/akv-secret-rotation/providers/Microsoft.KeyVault/vaults/akvJLrotationtest",
+            "defaultValue": "/subscriptions/9ddb6ca6-f086-4796-8c53-ea831f1df369/resourceGroups/jackltest/providers/Microsoft.KeyVault/vaults/jltestkv2",
             "type": "String",
             "metadata": {
                 "description": "ARM resource Id of the Key Vault where secret is stored"
