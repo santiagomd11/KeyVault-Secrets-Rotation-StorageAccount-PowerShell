@@ -17,14 +17,14 @@
             }
         },
         "storageAccountResourceId": {
-            "defaultValue": "/subscriptions/9ddb6ca6-f086-4796-8c53-ea831f1df369/resourceGroups/akv-secret-rotation/providers/Microsoft.Storage/storageAccounts/storagejlrotation",
+            "defaultValue": "/subscriptions/9ddb6ca6-f086-4796-8c53-ea831f1df369/resourceGroups/jackltest/providers/Microsoft.Storage/storageAccounts/jlteststr1",
             "type": "String",
             "metadata": {
                 "description": "ARM resource Id of the Storage Account for key rotation"
             }
         },
         "functionAppName": {
-            "defaultValue": "[concat(substring(resourceGroup().name, 0, 12), '-straccnt-rotate')]",
+            "defaultValue": "[concat(substring(resourceGroup().name, 0, min(length(resourceGroup().name), 12)), '-straccnt-rotate')]",
             "type": "String",
             "metadata": {
                 "description": "The name of the function app that you wish to create."
