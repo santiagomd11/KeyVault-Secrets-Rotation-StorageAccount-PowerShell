@@ -62,6 +62,7 @@
     },
     "variables": {
         "functionStorageAccountName": "[concat(uniquestring(parameters('functionAppName')), 'fnappstrg')]",
+        "appServicePlanName": "[concat(parameters('functionAppName'), '-fnapp-plan')]",
         "appServicePlanSKU": "[if(equals(parameters('newAppServicePlanType'),'Consumption Plan'),'Y1','EP1')]",
         "keyVaultName": "[toLower(split(parameters('keyVaultResourceId'),'/')[8])]",
         "keyVaultRG": "[toLower(split(parameters('keyVaultResourceId'),'/')[4])]",
@@ -84,13 +85,13 @@
         {
             "type": "Microsoft.Web/serverfarms",
             "apiVersion": "2022-03-01",
-            "name": "[concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan')]",
+            "name": "[variables('appServicePlanName')]",
             "location": "[resourceGroup().location]",
             "sku": {
                 "name": "[variables('appServicePlanSKU')]"
             },
             "properties": {
-                "name": "[concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan')]"
+                "name": "[variables('appServicePlanName')]"
             },
             "condition": "[equals(parameters('NewOrExistingAppServicePlan'), 'New')]"
         },
@@ -113,7 +114,7 @@
             "name": "[parameters('functionAppName')]",
             "location": "[resourceGroup().location]",
             "dependsOn": [
-                "[resourceId('Microsoft.Web/serverfarms', concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan'))]",
+                "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
                 "[resourceId('Microsoft.Storage/storageAccounts', variables('functionStorageAccountName'))]",
                 "[resourceId('Microsoft.Insights/components', parameters('functionAppName'))]"
             ],
@@ -123,7 +124,7 @@
             },
             "properties": {
                 "enabled": true,
-                "serverFarmId": "[if(equals(parameters('NewOrExistingAppServicePlan'), 'New'),resourceId('Microsoft.Web/serverfarms',concat(resourceGroup().name, '-StorageAccount-rotation-fnapp-plan')), parameters('existingAppServicePlanResourceId'))]",
+                "serverFarmId": "[if(equals(parameters('NewOrExistingAppServicePlan'), 'New'),resourceId('Microsoft.Web/serverfarms',variables('appServicePlanName')), parameters('existingAppServicePlanResourceId'))]",
                 "siteConfig": {
                     "appSettings": [
                         {
@@ -191,7 +192,7 @@
                         {
                             "type": "Microsoft.Authorization/roleAssignments",
                             "apiVersion": "2022-04-01",
-                            "name": "[guid(concat('keyvault-', uniqueString(resourceGroup().id)))]",
+                            "name": "[guid(concat('keyvault-',variables('keyVaultName'), uniqueString(resourceGroup().id)))]",
                             "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
                             "properties": {
                                 "roleDefinitionId": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
@@ -243,7 +244,7 @@
                         {
                             "type": "Microsoft.Authorization/roleAssignments",
                             "apiVersion": "2022-04-01",
-                            "name": "[guid(concat('storageAccount-', uniqueString(resourceGroup().id)))]",
+                            "name": "[guid(concat('storageAccount-',variables('storageAccountName'), uniqueString(resourceGroup().id)))]",
                             "scope": "[concat('Microsoft.Storage/storageAccounts', '/', variables('storageAccountName'))]",
                             "properties": {
                                 "roleDefinitionId": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/81a9662b-bebf-436f-a333-f67b29880f12')]",
