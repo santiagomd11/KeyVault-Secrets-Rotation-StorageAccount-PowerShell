@@ -217,7 +217,7 @@
                                     "subjectBeginsWith": "[parameters('secretName')]",
                                     "subjectEndsWith": "[parameters('secretName')]",
                                     "includedEventTypes": [
-                                        "Microsoft.KeyVault.SecretNearExpiry"
+                                        "Microsoft.KeyVault.SecretRotationPending"
                                     ]
                                 }
                             }
