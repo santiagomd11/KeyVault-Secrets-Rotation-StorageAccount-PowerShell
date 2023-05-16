@@ -1,9 +1,10 @@
-using namespace System.Net
-
-# Input bindings are passed in via param block.
-param($Request, $TriggerMetadata)
+param($eventGridEvent, $TriggerMetadata)
 
 function RegenerateCredential($credentialId, $providerAddress){
+    if(-Not($providerAddress)){
+       throw "Provider Address is missing"
+    }
+
     Write-Host "Regenerating credential. Id: $credentialId Resource Id: $providerAddress"
     
     $storageAccountName = ($providerAddress -split '/')[8]
@@ -16,6 +17,11 @@ function RegenerateCredential($credentialId, $providerAddress){
 }
 
 function GetAlternateCredentialId($credentialId){
+   #if empty then same as key1
+   if(-Not($credentialId)){
+       return "key2"
+   }
+   
    $validCredentialIdsRegEx = 'key[1-2]'
    
    If($credentialId -NotMatch $validCredentialIdsRegEx){
@@ -35,15 +41,28 @@ function AddSecretToKeyVault($keyVAultName,$secretName,$secretvalue,$exprityDate
 
 }
 
-function RoatateSecret($keyVaultName,$secretName){
+function RoatateSecret($keyVaultName,$secretName,$secretVersion){
     #Retrieve Secret
-    $secret = (Get-AzKeyVaultSecret -VaultName $keyVAultName -Name $secretName)
+    $token = (Get-AzAccessToken -ResourceUrl "https://vault.azure.net").Token
+    $headers = @{
+        "Authorization" = "Bearer $token"
+        "Content-Type" = "application/json"
+    }
+
+    $secret = (Invoke-WebRequest -Uri "https://$keyVaultName.vault.azure.net/secrets/${secretName}?api-version=7.6-preview.1" -Headers $headers -Method GET).Content | ConvertFrom-Json
+   
     Write-Host "Secret Retrieved"
     
+    If($secret.Version -ne $secretVersion){
+        #if current version is different than one retrived in event
+        Write-Host "Secret version is already rotated"
+        return 
+    }
+
     #Retrieve Secret Info
-    $validityPeriodDays = $secret.Tags["ValidityPeriodDays"]
-    $credentialId=  $secret.Tags["CredentialId"]
-    $providerAddress = $secret.Tags["ProviderAddress"]
+    $validityPeriodDays = $secret.rotationPolicy.validityPeriod
+    $credentialId=  $secret.providerConfig.ActiveCredentialId
+    $providerAddress = $secret.providerConfig.providerAddress
     
     Write-Host "Secret Info Retrieved"
     Write-Host "Validity Period: $validityPeriodDays"
@@ -59,54 +78,30 @@ function RoatateSecret($keyVaultName,$secretName){
     Write-Host "Credential regenerated. Credential Id: $alternateCredentialId Resource Id: $providerAddress"
 
     #Add new credential to Key Vault
-    $newSecretVersionTags = @{}
-    $newSecretVersionTags.ValidityPeriodDays = $validityPeriodDays
-    $newSecretVersionTags.CredentialId=$alternateCredentialId
-    $newSecretVersionTags.ProviderAddress = $providerAddress
+    $setSecretBody = @{
+        value = $newCredentialValue
+        providerConfig = @{
+            activeCredentialId = $alternateCredentialId
+        }
+    } | ConvertTo-Json -Depth 10
 
-    $expiryDate = (Get-Date).AddDays([int]$validityPeriodDays).ToUniversalTime()
-    $secretvalue = ConvertTo-SecureString "$newCredentialValue" -AsPlainText -Force
-    AddSecretToKeyVault $keyVAultName $secretName $secretvalue $expiryDate $newSecretVersionTags
+    Invoke-WebRequest -Uri "https://$keyVaultName.vault.azure.net/secrets/${secretName}/pending?api-version=7.6-preview.1" -Headers $headers -Body $setSecretBody -Method PUT
 
     Write-Host "New credential added to Key Vault. Secret Name: $secretName"
 }
+$ErrorActionPreference = "Stop"
+# Make sure to pass hashtables to Out-String so they're logged correctly
+$eventGridEvent | ConvertTo-Json | Write-Host
 
+$secretName = $eventGridEvent.subject
+$secretVersion = $eventGridEvent.data.Version
+$keyVaultName = $eventGridEvent.data.VaultName
 
-# Write to the Azure Functions log stream.
-Write-Host "HTTP trigger function processed a request."
+Write-Host "Key Vault Name: $keyVAultName"
+Write-Host "Secret Name: $secretName"
+Write-Host "Secret Version: $secretVersion"
 
-Try{
-    #Validate request paramaters
-    $keyVAultName = $Request.Query.KeyVaultName
-    $secretName = $Request.Query.SecretName
-    if (-not $keyVAultName -or -not $secretName ) {
-        $status = [HttpStatusCode]::BadRequest
-        $body = "Please pass a KeyVaultName and SecretName on the query string"
-        break
-    }
-    
-    Write-Host "Key Vault Name: $keyVAultName"
-    Write-Host "Secret Name: $secretName"
-    
-    #Rotate secret
-    Write-Host "Rotation started. Secret Name: $secretName"
-    RoatateSecret $keyVAultName $secretName
-
-    $status = [HttpStatusCode]::Ok
-    $body = "Secret Rotated Successfully"
-     
-}
-Catch{
-    $status = [HttpStatusCode]::InternalServerError
-    $body = "Error during secret rotation"
-    Write-Error "Secret Rotation Failed: $_.Exception.Message"
-}
-Finally
-{
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
-        StatusCode = $status
-        Body = $body
-    })
-}
-
+#Rotate secret
+Write-Host "Rotation started."
+RoatateSecret $keyVAultName $secretName $secretVersion
+Write-Host "Secret Rotated Successfully"
