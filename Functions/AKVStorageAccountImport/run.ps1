@@ -1,42 +1,41 @@
 param($eventGridEvent, $TriggerMetadata)
 
-function RegenerateCredential($credentialId, $providerAddress){
+function GetCredential($credentialId, $providerAddress){
     if(-Not($providerAddress)){
        throw "Provider Address is missing"
     }
 
-    Write-Host "Regenerating credential. Id: $credentialId Resource Id: $providerAddress"
+    Write-Host "Retrieving credential. Id: $credentialId Resource Id: $providerAddress"
     
     $storageAccountName = ($providerAddress -split '/')[8]
     $resourceGroupName = ($providerAddress -split '/')[4]
     
-    #Regenerate key 
-    $operationResult = New-AzStorageAccountKey -ResourceGroupName $resourceGroupName -Name $storageAccountName -KeyName $credentialId
+    #Retrieve credential
     $newCredentialValue = (Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -AccountName $storageAccountName|where KeyName -eq $credentialId).value 
     return $newCredentialValue
 }
 
-function GetAlternateCredentialId($credentialId){
+function EvaluateCredentialId($credentialId){
    
-   #if empty, default to key1
-   if(-Not($credentialId)){
-       $credentialId = "key1"
-   }
-   
-   $validCredentialIdsRegEx = 'key[1-2]'
-   
-   If($credentialId -NotMatch $validCredentialIdsRegEx){
-       throw "Invalid credential id: $credentialId. Credential id must follow this pattern:$validCredentialIdsRegEx"
-   }
-   If($credentialId -eq 'key1'){
-       return "key2"
-   }
-   Else{
-       return "key1"
-   }
-}
+    #if empty, default to key1
+    if(-Not($credentialId)){
+        $credentialId = "key1"
+    }
+    
+    $validCredentialIdsRegEx = 'key[1-2]'
+    
+    If($credentialId -NotMatch $validCredentialIdsRegEx){
+        throw "Invalid credential id: $credentialId. Credential id must follow this pattern:$validCredentialIdsRegEx"
+    }
+    If($credentialId -eq 'key1'){
+        return "key2"
+    }
+    Else{
+        return "key1"
+    }
+ }
 
-function RoatateSecret($keyVaultName,$secretName,$secretVersion){
+function ImportSecret($keyVaultName,$secretName,$secretVersion){
     #Retrieve Secret
     $token = (Get-AzAccessToken -ResourceUrl "https://vault.azure.net").Token
     $headers = @{
@@ -50,13 +49,13 @@ function RoatateSecret($keyVaultName,$secretName,$secretVersion){
     
     If($secret.Version -ne $secretVersion){
         #if current version is different than one retrived in event
-        Write-Host "Secret version is already rotated"
+        Write-Host "Secret version is already imported"
         return 
     }
 
     #Retrieve Secret Info
     $validityPeriodDays = $secret.rotationPolicy.validityPeriod
-    $credentialId=  $secret.providerConfig.ActiveCredentialId
+    $credentialId =  $secret.providerConfig.ActiveCredentialId
     $providerAddress = $secret.providerConfig.providerAddress
     
     Write-Host "Secret Info Retrieved"
@@ -64,19 +63,17 @@ function RoatateSecret($keyVaultName,$secretName,$secretVersion){
     Write-Host "Credential Id: $credentialId"
     Write-Host "Provider Address: $providerAddress"
 
-    #Get Credential Id to rotate - alternate credential
-    $alternateCredentialId = GetAlternateCredentialId $credentialId
-    Write-Host "Alternate credential id: $alternateCredentialId"
+    $credentialId = EvaluateCredentialId $credentialId
 
-    #Regenerate alternate access credential in provider
-    $newCredentialValue = (RegenerateCredential $alternateCredentialId $providerAddress)
-    Write-Host "Credential regenerated. Credential Id: $alternateCredentialId Resource Id: $providerAddress"
+    #Get credential in provider
+    $newCredentialValue = (RegenerateCredential $credentialId $providerAddress)
+    Write-Host "Credential retrieved. Credential Id: $credentialId Resource Id: $providerAddress"
 
     #Add new credential to Key Vault
     $setSecretBody = @{
         value = $newCredentialValue
         providerConfig = @{
-            activeCredentialId = $alternateCredentialId
+            activeCredentialId = $credentialId
         }
     } | ConvertTo-Json -Depth 10
 
@@ -88,7 +85,7 @@ $ErrorActionPreference = "Stop"
 # Make sure to pass hashtables to Out-String so they're logged correctly
 $eventGridEvent | ConvertTo-Json | Write-Host
 
-If($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretRotationPending")
+If($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretImportPending")
 {
     $secretName = $eventGridEvent.subject
     $secretVersion = $eventGridEvent.data.Version
@@ -99,10 +96,10 @@ If($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretRotationPending")
     Write-Host "Secret Version: $secretVersion"
 
     #Rotate secret
-    Write-Host "Rotation started."
-    RoatateSecret $keyVAultName $secretName $secretVersion
-    Write-Host "Secret Rotated Successfully"
+    Write-Host "Import started."
+    ImportSecret $keyVAultName $secretName $secretVersion
+    Write-Host "Secret Imported Successfully"
 }
 else {
-    throw "Invalid event grid event. Microsoft.KeyVault.SecretRotationPending is required to initiate rotation."
+    throw "Invalid event grid event. Microsoft.KeyVault.SecretImportPending is required to initiate import."
 }
