@@ -68,7 +68,8 @@
         "keyVaultRG": "[toLower(split(parameters('keyVaultResourceId'),'/')[4])]",
         "storageAccountRG": "[toLower(split(parameters('storageAccountResourceId'),'/')[4])]",
         "storageAccountName": "[toLower(split(parameters('storageAccountResourceId'),'/')[8])]",
-        "eventSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'))]"
+        "eventRotateSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'),'Rotation')]",
+        "eventImportSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'),'Import')]"
     },
     "resources": [
         {
@@ -202,7 +203,7 @@
                         {
                             "type": "Microsoft.KeyVault/vaults/providers/eventSubscriptions",
                             "apiVersion": "2023-06-01-preview",
-                            "name": "[concat(variables('keyVaultName'),'/Microsoft.EventGrid/',variables('eventSubscriptionName'))]",
+                            "name": "[concat(variables('keyVaultName'),'/Microsoft.EventGrid/',variables('eventRotateSubscriptionName'))]",
                             "location": "centraluseuap",
                             "properties": {
                                 "destination": {
@@ -218,6 +219,29 @@
                                     "subjectEndsWith": "[parameters('secretName')]",
                                     "includedEventTypes": [
                                         "Microsoft.KeyVault.SecretRotationPending"
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "type": "Microsoft.KeyVault/vaults/providers/eventSubscriptions",
+                            "apiVersion": "2023-06-01-preview",
+                            "name": "[concat(variables('keyVaultName'),'/Microsoft.EventGrid/',variables('eventImportSubscriptionName'))]",
+                            "location": "centraluseuap",
+                            "properties": {
+                                "destination": {
+                                    "endpointType": "AzureFunction",
+                                    "properties": {
+                                        "maxEventsPerBatch": 1,
+                                        "preferredBatchSizeInKilobytes": 64,
+                                        "resourceId": "[concat(resourceId('Microsoft.Web/sites', parameters('functionAppName')),'/functions/AKVStorageAccountImport')]"
+                                    }
+                                },
+                                "filter": {
+                                    "subjectBeginsWith": "[parameters('secretName')]",
+                                    "subjectEndsWith": "[parameters('secretName')]",
+                                    "includedEventTypes": [
+                                        "Microsoft.KeyVault.SecretImportPending"
                                     ]
                                 }
                             }
