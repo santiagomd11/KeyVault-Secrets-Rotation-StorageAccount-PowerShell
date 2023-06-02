@@ -6,45 +6,16 @@ Functions regenerate individual key (alternating between two keys) in Storage Ac
 
 This project framework provides the following features:
 
-* Rotation function for StorageAccount key triggered by Event Grid (AKVStorageAccountRotation)
+* Azure function (AKVStorageAccountConnector) to manage Storage Account key. It is triggered by Event Grid 
 
-* Rotation function for Storage Account key triggered by HTTP call (AKVStorageAccountRotationHttp)
-
-* ARM template for function deployment with secret deployment (optional)
-
-* ARM template for adding storage account key to existing function with secret deployment (optional)
-
+* ARM template for function deployment 
 
 ## Getting Started
 
-Functions require following information stored in secret as tags:
-
-* $secret.Tags["ValidityPeriodDays"] - number of days, it defines expiration date for new secret
-* $secret.Tags["CredentialId"] - Storage Account credential id (i.e. key1/key2)
-* $secret.Tags["ProviderAddress"] - Storage Account Resource Id
-
-You can create new secret with above tags and Storage Account key as value or add those tags to existing secret with Storage Account key. For automated rotation expiry date will also be required - key vault triggers 'SecretNearExpiry' event 30 days before expiry.
-
-There are two available functions performing rotation:
-
-* AKVStorageAccountRotation - event triggered function, performs storage account key rotation triggered by Key Vault events. In this setup Near Expiry event is used which is published 30 days before expiration
-* AKVStorageAccountRotationHttp - on-demand function with KeyVaultName and Secret name as parameters
-
-Functions are using Function App identity to access Key Vault and existing secret "CredentialId" tag with storage account key id (key1/key2) and "ProviderAddress" with Storage Account Resource Id.
+* AKVStorageAccountConnector - event triggered function, performs storage account key import and rotation
 
 ### Installation
 
 ARM templates available:
 
 * [Secrets rotation Azure Function and configuration deployment template](https://github.com/Azure/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/blob/main/ARM-Templates/Readme.md) - it creates and deploys function app and function code, creates necessary permissions,  Key Vault event subscription for Near Expiry Event for individual secret (secret name can be provided as parameter), and deploys secret with Storage Account key (optional)
-* [Add event subscription to existing Azure Function deployment template](https://github.com/Azure/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/blob/main/ARM-Templates/Readme.md) - function can be used for multiple services for rotation. This template creates new event subscription for secret, necessary permissions to existing function and deploys secret with Storage Account key(optional).
-
-## Demo
-
-You can find example for Storage Account rotation in tutorial below:
-[Automate the rotation of a secret for resources that have two sets of authentication credentials](https://docs.microsoft.com/azure/key-vault/secrets/tutorial-rotation-dual)
-
-Youtube:
-https://youtu.be/qcdVbXJ7e-4
-
-This project was generated using [this](https://github.com/Azure/KeyVault-Secrets-Rotation-Template-PowerShell) template. You can find instructions [here](https://github.com/Azure/KeyVault-Secrets-Rotation-Template-PowerShel/blob/main/Project-Template-Instructions.md)

@@ -8,9 +8,8 @@ Components:
 
 - App Service Plan
 - Function App with access to Key Vault and StorageAccount 
-- Functions to rotate StorageAccount keys
-- Event Subscription
-- Secret deployment (optional)
+- ZipDeploy for Azure Function to import and rotate key 
+- Event Subscriptions
 
 <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure%2FKeyVault-Secrets-Rotation-StorageAccount-PowerShell%2Fmain%2FARM-Templates%2FFunction%2Fazuredeploy.json" target="_blank">
     <img src="https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/deploytoazure.png"/>
