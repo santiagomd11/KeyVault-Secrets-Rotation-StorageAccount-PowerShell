@@ -165,7 +165,7 @@ $eventGridEvent | ConvertTo-Json | Write-Host
 
 if(-not($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretImportPending" -or $eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretRotationPending" ))
 {
-    throw "Invalid event grid event. Microsoft.KeyVault.SecretImportPending is required to initiate import."
+    throw "Invalid event grid event. Microsoft.KeyVault.SecretImportPending or Microsoft.KeyVault.SecretRotationPending is required."
 }
 
 $secretName = $eventGridEvent.subject
