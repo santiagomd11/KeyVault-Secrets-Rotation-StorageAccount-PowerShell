@@ -1,8 +1,8 @@
 # StorageAccount keys rotation ARM templates
 
-This template creates below components to help demonstrate StorageAccount keys rotation in Key Vault using Function and Event Grid notification.
+This template creates below components for Storage Account keys management in Key Vault using Function and Event Grid notification.
 
-### StorageAccount keys rotation function ARM template:
+### Azure Key Vault Storage Account keys connector function ARM template:
 
 Components:
 
