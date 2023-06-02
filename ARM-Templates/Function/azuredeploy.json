@@ -68,8 +68,7 @@
         "keyVaultRG": "[toLower(split(parameters('keyVaultResourceId'),'/')[4])]",
         "storageAccountRG": "[toLower(split(parameters('storageAccountResourceId'),'/')[4])]",
         "storageAccountName": "[toLower(split(parameters('storageAccountResourceId'),'/')[8])]",
-        "eventRotateSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'),'Rotation')]",
-        "eventImportSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'),'Import')]"
+        "eventSubscriptionName": "[concat(parameters('functionAppName'),'-',parameters('secretName'),'-connector')]"
     },
     "resources": [
         {
@@ -205,7 +204,7 @@
                         {
                             "type": "Microsoft.KeyVault/vaults/providers/eventSubscriptions",
                             "apiVersion": "2023-06-01-preview",
-                            "name": "[concat(variables('keyVaultName'),'/Microsoft.EventGrid/',variables('eventRotateSubscriptionName'))]",
+                            "name": "[concat(variables('keyVaultName'),'/Microsoft.EventGrid/',variables('eventSubscriptionName'))]",
                             "location": "centraluseuap",
                             "properties": {
                                 "destination": {
