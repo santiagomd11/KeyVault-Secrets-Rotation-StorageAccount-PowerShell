@@ -18,4 +18,4 @@ This project framework provides the following features:
 
 ARM templates available:
 
-* [Secrets rotation Azure Function and configuration deployment template](https://github.com/Azure/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/blob/main/ARM-Templates/Readme.md) - it creates and deploys function app and function code, creates necessary permissions,  Key Vault event subscription for ImportPending and RotationPending events for individual secret (secret name can be provided as parameter).
+* [Secrets rotation Azure Function and configuration deployment template](https://github.com/jlichwa/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/blob/main/ARM-Templates/Readme.md) - it creates and deploys function app and function code, creates necessary permissions,  Key Vault event subscription for ImportPending and RotationPending events for individual secret (secret name can be provided as parameter).
