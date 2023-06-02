@@ -1,6 +1,6 @@
 # KeyVault-Secrets-Rotation-StorageAccount-PowerShell
 
-Functions regenerate individual key (alternating between two keys) in Storage Account and add regenerated key to Key Vault as new version of the same secret.
+Function imports and rotate individual key (alternating between two keys) in Storage Account and stores them in Key Vault.
 
 ## Features
 
@@ -10,7 +10,7 @@ This project framework provides the following features:
 
 * ARM template for function deployment 
 
-## Getting Started
+## Functions
 
 * AKVStorageAccountConnector - event triggered function, performs storage account key import and rotation
 
@@ -18,4 +18,4 @@ This project framework provides the following features:
 
 ARM templates available:
 
-* [Secrets rotation Azure Function and configuration deployment template](https://github.com/Azure/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/blob/main/ARM-Templates/Readme.md) - it creates and deploys function app and function code, creates necessary permissions,  Key Vault event subscription for Near Expiry Event for individual secret (secret name can be provided as parameter), and deploys secret with Storage Account key (optional)
+* [Secrets rotation Azure Function and configuration deployment template](https://github.com/Azure/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/blob/main/ARM-Templates/Readme.md) - it creates and deploys function app and function code, creates necessary permissions,  Key Vault event subscription for ImportPending and RotationPending events for individual secret (secret name can be provided as parameter).
