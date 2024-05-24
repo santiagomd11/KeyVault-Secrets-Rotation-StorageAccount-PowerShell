@@ -1,193 +1,225 @@
-param($eventGridEvent, $TriggerMetadata)
+param([object]$EventGridEvent, [object]$TriggerMetadata)
 
-function GetCredential($credentialId, $providerAddress){
-    if(-Not($providerAddress)){
-       throw "Provider Address is missing"
+$MAX_RETRY_ATTEMPTS = 30
+$MAX_JSON_DEPTH = 10
+$DATA_PLANE_API_VERSION = "7.6-preview.1"
+$AKV_RESOURCE_URL = "https://vault.azure.net"
+
+function Get-CredentialValue([string]$ActiveCredentialId, [string]$ProviderAddress) {
+    if (-not ($ActiveCredentialId)) {
+        throw "The active credential ID is missing."
     }
+    if ($ActiveCredentialId -notin @("key1", "key2")) {
+        throw "The active credential ID '$ActiveCredentialId' didn't match the expected pattern. Expected 'key1' or 'key2'."
+    }
+    if (-not ($ProviderAddress)) {
+        throw "The provider address is missing."
+    }
+    if (-not ($ProviderAddress -match "/subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft.Storage/storageAccounts/([^/]+)")) {
+        throw "The provider address '$ProviderAddress' didn't match the expected pattern."
+    }
+    $subscriptionId = $Matches[1]
+    $resourceGroupName = $Matches[2]
+    $storageAccountName = $Matches[3]
 
-    Write-Host "Retrieving credential. Id: $credentialId Resource Id: $providerAddress"
-    
-    $storageAccountName = ($providerAddress -split '/')[8]
-    $resourceGroupName = ($providerAddress -split '/')[4]
-    
-    #Retrieve credential
-    $newCredentialValue = (Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -AccountName $storageAccountName|where KeyName -eq $credentialId).value 
-    return $newCredentialValue
+    $null = Select-AzSubscription -SubscriptionId $subscriptionId
+    return (Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -AccountName $storageAccountName | Where-Object KeyName -eq $ActiveCredentialId).value
 }
 
-function RegenerateCredential($credentialId, $providerAddress){
-    if(-Not($providerAddress)){
-       throw "Provider Address is missing"
+function Invoke-CredentialRegeneration([string]$InactiveCredentialId, [string]$ProviderAddress) {
+    if (-not ($ProviderAddress)) {
+        throw "The provider address is missing."
     }
+    if (-not ($ProviderAddress -match "/subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft.Storage/storageAccounts/([^/]+)")) {
+        throw "The provider address '$ProviderAddress' didn't match the expected pattern."
+    }
+    $subscriptionId = $Matches[1]
+    $resourceGroupName = $Matches[2]
+    $storageAccountName = $Matches[3]
 
-    Write-Host "Regenerating credential. Id: $credentialId Resource Id: $providerAddress"
-    
-    $storageAccountName = ($providerAddress -split '/')[8]
-    $resourceGroupName = ($providerAddress -split '/')[4]
-    
-    #Regenerate key 
-    $operationResult = New-AzStorageAccountKey -ResourceGroupName $resourceGroupName -Name $storageAccountName -KeyName $credentialId
-    $newCredentialValue = (Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -AccountName $storageAccountName|where KeyName -eq $credentialId).value 
-    return $newCredentialValue
+    $null = Select-AzSubscription -SubscriptionId $subscriptionId
+    $null = New-AzStorageAccountKey -ResourceGroupName $resourceGroupName -Name $storageAccountName -KeyName $InactiveCredentialId
+    return (Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -AccountName $storageAccountName | Where-Object KeyName -eq $InactiveCredentialId).value
 }
 
-function EvaluateCredentialId($credentialId){
-   
-    #if empty, default to key1
-    if(-Not($credentialId)){
-        $credentialId = "key1"
+function Get-InactiveCredentialId([string]$ActiveCredentialId) {
+    $inactiveCredentialId = switch ($ActiveCredentialId) {
+        "key1" { "key2" }
+        "key2" { "key1" }
+        default { throw "The active credential ID '$ActiveCredentialId' didn't match the expected pattern. Expected 'key1' or 'key2'." }
     }
-    
-    $validCredentialIdsRegEx = 'key[1-2]'
-    
-    If($credentialId -NotMatch $validCredentialIdsRegEx){
-        throw "Invalid credential id: $credentialId. Credential id must follow this pattern:$validCredentialIdsRegEx"
-    }
-
-    return $credentialId
- }
-
- function GetAlternateCredentialId($currentCredentialId){
-   
-   $currentCredentialId = EvaluateCredentialId $currentCredentialId
-
-    If($currentCredentialId -eq 'key1'){
-        return "key2"
-    }
-    Else{
-        return "key1"
-    }
+    return $inactiveCredentialId
 }
 
-function ImportSecret($keyVaultName,$secretName,$secretVersion){
-    #Retrieve Secret
-    $token = (Get-AzAccessToken -ResourceUrl "https://vault.azure.net").Token
-    $headers = @{
-        "Authorization" = "Bearer $token"
-        "Content-Type" = "application/json"
-    }
+function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$UnversionedSecretId) {
+    $expectedLifecycleState = "ImportPending"
+    $token = (Get-AzAccessToken -ResourceUrl $AKV_RESOURCE_URL).Token
 
-    $currentSecret = (Invoke-WebRequest -Uri "https://$keyVaultName.vault.azure.net/secrets/${secretName}?api-version=7.6-preview.1" -Headers $headers -Method GET).Content | ConvertFrom-Json
-    $currentSecretVersion = $currentSecret.id.Split("/")[-1]
-
-    Write-Host "Secret Retrieved"
-    
-    If($currentSecretVersion -ne $secretVersion){
-        #if current version is different than one retrived in event
-        Write-Host "The secret version is already imported"
-        return 
-    }
-
-    #Retrieve Secret Info
-    $validityPeriodDays = $currentSecret.rotationPolicy.validityPeriod
-    $credentialId =  $currentSecret.providerConfig.ActiveCredentialId
-    $providerAddress = $currentSecret.providerConfig.providerAddress
-    
-    Write-Host "Secret Info Retrieved"
-    Write-Host "Validity Period: $validityPeriodDays"
-    Write-Host "Credential Id: $credentialId"
-    Write-Host "Provider Address: $providerAddress"
-
-    $credentialId = EvaluateCredentialId $credentialId
-
-    #Get credential in provider
-    $newCredentialValue = (GetCredential $credentialId $providerAddress)
-    Write-Host "Credential retrieved. Credential Id: $credentialId Resource Id: $providerAddress"
-
-    #Add new credential to Key Vault
-    $setSecretBody = @{
-        id = $currentSecret.id
-        value = $newCredentialValue
-        providerConfig = @{
-            activeCredentialId = $credentialId
+    # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
+    # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
+    Write-Host "[Step 1] Get the current secret for validation and the ground truth."
+    $secret = $null
+    $actualSecretId = $null
+    $actualLifecycleState = $null
+    foreach ($i in 1..$MAX_RETRY_ATTEMPTS) {
+        $clientRequestId = [Guid]::NewGuid().ToString()
+        Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
+        $headers = @{
+            "Authorization"          = "Bearer $token"
+            "User-Agent"             = "[AKVStorageAccountConnector][Invoke-PendingSecretImport][Step 1][$i]"
+            "x-ms-client-request-id" = $clientRequestId
         }
-    } | ConvertTo-Json -Depth 10
+        $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
+            -Method "GET" `
+            -Headers $headers `
+            -ContentType "application/json"
+        $secret = $response.Content | ConvertFrom-Json
+        $actualSecretId = $secret.id
+        $actualLifecycleState = $secret.attributes.lifecycleState
+        if (($actualSecretId -eq $VersionedSecretId) -and ($actualLifecycleState -eq $expectedLifecycleState)) {
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    if (-not ($actualSecretId -eq $VersionedSecretId)) {
+        throw "The secret '$actualSecretId' did not transition to '$VersionedSecretId' after approximately $MAX_RETRY_ATTEMPTS seconds."
+    }
+    if (-not ($actualLifecycleState -eq $expectedLifecycleState)) {
+        throw "The secret '$actualSecretId' still has a lifecycle state of '$actualLifecycleState' and did not transition to '$expectedLifecycleState' after approximately $MAX_RETRY_ATTEMPTS seconds."
+    }
+    $lifecycleDescription = $secret.attributes.lifecycleDescription
+    $validityPeriod = $secret.rotationPolicy.validityPeriod
+    $activeCredentialId = $secret.providerConfig.activeCredentialId
+    $providerAddress = $secret.providerConfig.providerAddress
+    $functionResourceId = $secret.providerConfig.functionResourceId
+    Write-Host "  lifecycleDescription: '$lifecycleDescription'"
+    Write-Host "  validityPeriod: '$validityPeriod'"
+    Write-Host "  activeCredentialId: '$activeCredentialId'"
+    Write-Host "  providerAddress: '$providerAddress'"
+    Write-Host "  functionResourceId: '$functionResourceId'"
 
-    Invoke-WebRequest -Uri "https://$keyVaultName.vault.azure.net/secrets/${secretName}/pending?api-version=7.6-preview.1" -Headers $headers -Body $setSecretBody -Method PUT
+    Write-Host "[Step 2] Import the secret from the provider and prepare the new secret in-memory."
+    $activeCredentialValue = Get-CredentialValue -ActiveCredentialId $activeCredentialId -ProviderAddress $providerAddress
+    $secret | Add-Member -NotePropertyName "value" -NotePropertyValue $activeCredentialValue -Force
+    $secret.providerConfig.activeCredentialId = $activeCredentialId
+    $updatePendingSecretRequestBody = ConvertTo-Json $secret -Depth $MAX_JSON_DEPTH -Compress
 
-    Write-Host "New credential added to Key Vault. Secret Name: $secretName"
+    Write-Host "[Step 3] Update the pending secret."
+    $clientRequestId = [Guid]::NewGuid().ToString()
+    Write-Host "  x-ms-client-request-id: '$clientRequestId'"
+    $headers = @{
+        "Authorization"          = "Bearer $token"
+        "User-Agent"             = "[AKVStorageAccountConnector][Invoke-PendingSecretImport][Step 3]"
+        "x-ms-client-request-id" = $clientRequestId
+    }
+    $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `
+        -Method "PUT" `
+        -Headers $headers `
+        -ContentType "application/json" `
+        -Body $updatePendingSecretRequestBody
+    $updatedSecret = $response.Content | ConvertFrom-Json
+    $lifecycleState = $updatedSecret.attributes.lifecycleState
+    $lifecycleDescription = $updatedSecret.attributes.lifecycleDescription
+    $activeCredentialId = $updatedSecret.providerConfig.activeCredentialId
+    Write-Host "  lifecycleState: '$lifecycleState'"
+    Write-Host "  lifecycleDescription: '$lifecycleDescription'"
+    Write-Host "  activeCredentialId: '$activeCredentialId'"
 }
 
-function RoatateSecret($keyVaultName,$secretName,$secretVersion){
-    #Retrieve Secret
-    $token = (Get-AzAccessToken -ResourceUrl "https://vault.azure.net").Token
-    $headers = @{
-        "Authorization" = "Bearer $token"
-        "Content-Type" = "application/json"
-    }
+function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$UnversionedSecretId) {
+    $expectedLifecycleState = "RotationPending"
+    $token = (Get-AzAccessToken -ResourceUrl $AKV_RESOURCE_URL).Token
 
-    $currentSecret = (Invoke-WebRequest -Uri "https://$keyVaultName.vault.azure.net/secrets/${secretName}?api-version=7.6-preview.1" -Headers $headers -Method GET).Content | ConvertFrom-Json
-    $currentSecretVersion = $currentSecret.id.Split("/")[-1]
-
-    Write-Host "Secret Retrieved"
-    
-    If($currentSecretVersion -ne $secretVersion){
-        #if current version is different than one retrived in event
-        Write-Host "The secret version is already rotated"
-        return 
-    }
-
-    #Retrieve Secret Info
-    $validityPeriodDays = $currentSecret.rotationPolicy.validityPeriod
-    $credentialId =  $currentSecret.providerConfig.ActiveCredentialId
-    $providerAddress = $currentSecret.providerConfig.providerAddress
-    
-    Write-Host "Secret Info Retrieved"
-    Write-Host "Validity Period: $validityPeriodDays"
-    Write-Host "Credential Id: $credentialId"
-    Write-Host "Provider Address: $providerAddress"
-
-    #Get Credential Id to rotate - alternate credential
-    $alternateCredentialId = GetAlternateCredentialId $credentialId
-    Write-Host "Alternate credential id: $alternateCredentialId"
-
-    #Regenerate alternate access credential in provider
-    $newCredentialValue = (RegenerateCredential $alternateCredentialId $providerAddress)
-    Write-Host "Credential regenerated. Credential Id: $alternateCredentialId Resource Id: $providerAddress"
-
-    #Add new credential to Key Vault
-    $setSecretBody = @{
-        id = $currentSecret.id
-        value = $newCredentialValue
-        providerConfig = @{
-            activeCredentialId = $alternateCredentialId
+    # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
+    # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
+    Write-Host "[Step 1] Get the current secret for validation and the ground truth."
+    $secret = $null
+    $actualSecretId = $null
+    $actualLifecycleState = $null
+    foreach ($i in 1..$MAX_RETRY_ATTEMPTS) {
+        $clientRequestId = [Guid]::NewGuid().ToString()
+        Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
+        $headers = @{
+            "Authorization"          = "Bearer $token"
+            "User-Agent"             = "[AKVStorageAccountConnector][Invoke-PendingSecretRotation][Step 1][$i]"
+            "x-ms-client-request-id" = $clientRequestId
         }
-    } | ConvertTo-Json -Depth 10
+        $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
+            -Method "GET" `
+            -Headers $headers `
+            -ContentType "application/json"
+        $secret = $response.Content | ConvertFrom-Json
+        $actualSecretId = $secret.id
+        $actualLifecycleState = $secret.attributes.lifecycleState
+        if (($actualSecretId -eq $VersionedSecretId) -and ($actualLifecycleState -eq $expectedLifecycleState)) {
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    if (-not ($actualSecretId -eq $VersionedSecretId)) {
+        throw "The secret '$actualSecretId' did not transition to '$VersionedSecretId' after approximately $MAX_RETRY_ATTEMPTS seconds."
+    }
+    if (-not ($actualLifecycleState -eq $expectedLifecycleState)) {
+        throw "The secret '$actualSecretId' still has a lifecycle state of '$actualLifecycleState' and did not transition to '$expectedLifecycleState' after approximately $MAX_RETRY_ATTEMPTS seconds."
+    }
+    $lifecycleDescription = $secret.attributes.lifecycleDescription
+    $validityPeriod = $secret.rotationPolicy.validityPeriod
+    $activeCredentialId = $secret.providerConfig.activeCredentialId
+    $providerAddress = $secret.providerConfig.providerAddress
+    $functionResourceId = $secret.providerConfig.functionResourceId
+    Write-Host "  lifecycleDescription: '$lifecycleDescription'"
+    Write-Host "  validityPeriod: '$validityPeriod'"
+    Write-Host "  activeCredentialId: '$activeCredentialId'"
+    Write-Host "  providerAddress: '$providerAddress'"
+    Write-Host "  functionResourceId: '$functionResourceId'"
 
-    Invoke-WebRequest -Uri "https://$keyVaultName.vault.azure.net/secrets/${secretName}/pending?api-version=7.6-preview.1" -Headers $headers -Body $setSecretBody -Method PUT
+    Write-Host "[Step 2] Regenerate the inactive credential via the provider and prepare the new secret in-memory."
+    $inactiveCredentialId = Get-InactiveCredentialId -ActiveCredentialId $activeCredentialId
+    $inactiveCredentialValue = Invoke-CredentialRegeneration -InactiveCredentialId $inactiveCredentialId -ProviderAddress $providerAddress
+    $secret | Add-Member -NotePropertyName "value" -NotePropertyValue $inactiveCredentialValue -Force
+    $secret.providerConfig.activeCredentialId = $inactiveCredentialId
+    $updatePendingSecretRequestBody = ConvertTo-Json $secret -Depth $MAX_JSON_DEPTH -Compress
 
-    Write-Host "New credential added to Key Vault. Secret Name: $secretName"
+    Write-Host "[Step 3] Update the pending secret."
+    $clientRequestId = [Guid]::NewGuid().ToString()
+    Write-Host "  x-ms-client-request-id: '$clientRequestId'"
+    $headers = @{
+        "Authorization"          = "Bearer $token"
+        "User-Agent"             = "[AKVStorageAccountConnector][Invoke-PendingSecretRotation][Step 3]"
+        "x-ms-client-request-id" = $clientRequestId
+    }
+    $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `
+        -Method "PUT" `
+        -Headers $headers `
+        -ContentType "application/json" `
+        -Body $updatePendingSecretRequestBody
+    $updatedSecret = $response.Content | ConvertFrom-Json
+    $lifecycleState = $updatedSecret.attributes.lifecycleState
+    $lifecycleDescription = $updatedSecret.attributes.lifecycleDescription
+    $activeCredentialId = $updatedSecret.providerConfig.activeCredentialId
+    Write-Host "  lifecycleState: '$lifecycleState'"
+    Write-Host "  lifecycleDescription: '$lifecycleDescription'"
+    Write-Host "  activeCredentialId: '$activeCredentialId'"
 }
 
 $ErrorActionPreference = "Stop"
-# Make sure to pass hashtables to Out-String so they're logged correctly
-$eventGridEvent | ConvertTo-Json | Write-Host
 
-if(-not($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretImportPending" -or $eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretRotationPending" ))
-{
-    throw "Invalid event grid event. Microsoft.KeyVault.SecretImportPending or Microsoft.KeyVault.SecretRotationPending is required."
+$EventGridEvent | ConvertTo-Json -Depth $MAX_JSON_DEPTH -Compress | Write-Host
+$eventType = $EventGridEvent.eventType
+$versionedSecretId = $EventGridEvent.data.Id
+if (-not ($versionedSecretId -match "(https://[^/]+/[^/]+/[^/]+)/[0-9a-f]{32}")) {
+    throw "The versioned secret ID '$versionedSecretId' didn't match the expected pattern."
 }
+$unversionedSecretId = $Matches[1]
 
-$secretName = $eventGridEvent.subject
-$secretVersion = $eventGridEvent.data.Version
-$keyVaultName = $eventGridEvent.data.VaultName
-
-Write-Host "Key Vault Name: $keyVAultName"
-Write-Host "Secret Name: $secretName"
-Write-Host "Secret Version: $secretVersion"
-
-
-If($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretImportPending")
-{
-    #Import secret
-    Write-Host "Import started."
-    ImportSecret $keyVAultName $secretName $secretVersion
-    Write-Host "Secret Imported Successfully"
-}
-elseif($eventGridEvent.eventType -eq "Microsoft.KeyVault.SecretRotationPending")
-{
-    #Rotate secret
-    Write-Host "Rotation started."
-    RoatateSecret $keyVAultName $secretName $secretVersion
-    Write-Host "Secret Rotated Successfully"
+switch ($eventType) {
+    "Microsoft.KeyVault.SecretImportPending" {
+        Invoke-PendingSecretImport -VersionedSecretId $versionedSecretId -UnversionedSecretId $unversionedSecretId
+    }
+    "Microsoft.KeyVault.SecretRotationPending" {
+        Invoke-PendingSecretRotation -VersionedSecretId $versionedSecretId -UnversionedSecretId $unversionedSecretId
+    }
+    default {
+        throw "The Event Grid event '$eventType' is unsupported. Expected 'Microsoft.KeyVault.SecretImportPending' or 'Microsoft.KeyVault.SecretRotationPending'."
+    }
 }
