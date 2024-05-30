@@ -174,7 +174,7 @@
                 "[resourceId('Microsoft.Web/sites', parameters('functionAppName'))]"
             ],
             "properties": {
-                "packageUri": "https://github.com/jlichwa/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/releases/download/1.0/AKVStorageAccountConnector.zip"
+                "packageUri": "https://github.com/jlichwa/KeyVault-Secrets-Rotation-StorageAccount-PowerShell/releases/download/1.0/AkvStorageAccountConnector.zip"
             }
         },
         {
@@ -212,7 +212,7 @@
                                     "properties": {
                                         "maxEventsPerBatch": 1,
                                         "preferredBatchSizeInKilobytes": 64,
-                                        "resourceId": "[concat(resourceId('Microsoft.Web/sites', parameters('functionAppName')),'/functions/AKVStorageAccountConnector')]"
+                                        "resourceId": "[concat(resourceId('Microsoft.Web/sites', parameters('functionAppName')),'/functions/AkvStorageAccountConnector')]"
                                     }
                                 },
                                 "filter": {

@@ -66,7 +66,7 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
         Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
         $headers = @{
             "Authorization"          = "Bearer $token"
-            "User-Agent"             = "AKVStorageAccountConnector/1.0 (Invoke-PendingSecretImport; Step 1; Attempt $i)"
+            "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretImport; Step 1; Attempt $i)"
             "x-ms-client-request-id" = $clientRequestId
         }
         $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
@@ -109,7 +109,7 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
     Write-Host "  x-ms-client-request-id: '$clientRequestId'"
     $headers = @{
         "Authorization"          = "Bearer $token"
-        "User-Agent"             = "AKVStorageAccountConnector/1.0 (Invoke-PendingSecretImport; Step 3)"
+        "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretImport; Step 3)"
         "x-ms-client-request-id" = $clientRequestId
     }
     $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `
@@ -141,7 +141,7 @@ function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$Unver
         Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
         $headers = @{
             "Authorization"          = "Bearer $token"
-            "User-Agent"             = "AKVStorageAccountConnector/1.0 (Invoke-PendingSecretRotation; Step 1; Attempt $i)"
+            "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretRotation; Step 1; Attempt $i)"
             "x-ms-client-request-id" = $clientRequestId
         }
         $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
@@ -185,7 +185,7 @@ function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$Unver
     Write-Host "  x-ms-client-request-id: '$clientRequestId'"
     $headers = @{
         "Authorization"          = "Bearer $token"
-        "User-Agent"             = "AKVStorageAccountConnector/1.0 (Invoke-PendingSecretRotation; Step 3)"
+        "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretRotation; Step 3)"
         "x-ms-client-request-id" = $clientRequestId
     }
     $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `

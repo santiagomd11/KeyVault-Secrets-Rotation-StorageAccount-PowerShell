@@ -6,13 +6,13 @@ Function imports and rotate individual key (alternating between two keys) in Sto
 
 This project framework provides the following features:
 
-* Azure function (AKVStorageAccountConnector) to manage Storage Account key. It is triggered by Event Grid 
+* Azure function (AkvStorageAccountConnector) to manage Storage Account key. It is triggered by Event Grid 
 
 * ARM template for function deployment 
 
 ## Functions
 
-* AKVStorageAccountConnector - event triggered function, performs storage account key import and rotation
+* AkvStorageAccountConnector - event triggered function, performs storage account key import and rotation
 
 ### Installation
 
