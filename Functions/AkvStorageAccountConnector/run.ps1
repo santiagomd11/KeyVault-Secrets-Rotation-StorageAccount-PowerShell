@@ -52,8 +52,7 @@ function Get-InactiveCredentialId([string]$ActiveCredentialId) {
 
 function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$UnversionedSecretId) {
     $expectedLifecycleState = "ImportPending"
-    $akvResourceUrl = (Get-AzContext).Environment.AzureKeyVaultServiceEndpointResourceId
-    $token = (Get-AzAccessToken -ResourceUrl $akvResourceUrl).Token
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
 
     # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
     # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
@@ -128,8 +127,7 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
 
 function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$UnversionedSecretId) {
     $expectedLifecycleState = "RotationPending"
-    $akvResourceUrl = (Get-AzContext).Environment.AzureKeyVaultServiceEndpointResourceId
-    $token = (Get-AzAccessToken -ResourceUrl $akvResourceUrl).Token
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
 
     # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
     # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
