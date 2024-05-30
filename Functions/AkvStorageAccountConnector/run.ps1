@@ -3,7 +3,6 @@ param([object]$EventGridEvent, [object]$TriggerMetadata)
 $MAX_RETRY_ATTEMPTS = 30
 $MAX_JSON_DEPTH = 10
 $DATA_PLANE_API_VERSION = "7.6-preview.1"
-$AKV_RESOURCE_URL = "https://vault.azure.net"
 
 function Get-CredentialValue([string]$ActiveCredentialId, [string]$ProviderAddress) {
     if (-not ($ActiveCredentialId)) {
@@ -53,7 +52,8 @@ function Get-InactiveCredentialId([string]$ActiveCredentialId) {
 
 function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$UnversionedSecretId) {
     $expectedLifecycleState = "ImportPending"
-    $token = (Get-AzAccessToken -ResourceUrl $AKV_RESOURCE_URL).Token
+    $akvResourceUrl = (Get-AzContext).Environment.AzureKeyVaultServiceEndpointResourceId
+    $token = (Get-AzAccessToken -ResourceUrl $akvResourceUrl).Token
 
     # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
     # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
@@ -128,11 +128,12 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
 
 function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$UnversionedSecretId) {
     $expectedLifecycleState = "RotationPending"
-    $token = (Get-AzAccessToken -ResourceUrl $AKV_RESOURCE_URL).Token
+    $akvResourceUrl = (Get-AzContext).Environment.AzureKeyVaultServiceEndpointResourceId
+    $token = (Get-AzAccessToken -ResourceUrl $akvResourceUrl).Token
 
     # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
     # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
-    Write-Host "[Step 1] Get the current secret for validation and the ground truth."
+    Write-Host "Step 1: Get the current secret for validation and the ground truth."
     $secret = $null
     $actualSecretId = $null
     $actualLifecycleState = $null
@@ -173,14 +174,14 @@ function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$Unver
     Write-Host "  providerAddress: '$providerAddress'"
     Write-Host "  functionResourceId: '$functionResourceId'"
 
-    Write-Host "[Step 2] Regenerate the inactive credential via the provider and prepare the new secret in-memory."
+    Write-Host "Step 2: Regenerate the inactive credential via the provider and prepare the new secret in-memory."
     $inactiveCredentialId = Get-InactiveCredentialId -ActiveCredentialId $activeCredentialId
     $inactiveCredentialValue = Invoke-CredentialRegeneration -InactiveCredentialId $inactiveCredentialId -ProviderAddress $providerAddress
     $secret | Add-Member -NotePropertyName "value" -NotePropertyValue $inactiveCredentialValue -Force
     $secret.providerConfig.activeCredentialId = $inactiveCredentialId
     $updatePendingSecretRequestBody = ConvertTo-Json $secret -Depth $MAX_JSON_DEPTH -Compress
 
-    Write-Host "[Step 3] Update the pending secret."
+    Write-Host "Step 3: Update the pending secret."
     $clientRequestId = [Guid]::NewGuid().ToString()
     Write-Host "  x-ms-client-request-id: '$clientRequestId'"
     $headers = @{
