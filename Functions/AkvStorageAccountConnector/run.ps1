@@ -3,6 +3,12 @@ param([object]$EventGridEvent, [object]$TriggerMetadata)
 $MAX_RETRY_ATTEMPTS = 30
 $MAX_JSON_DEPTH = 10
 $DATA_PLANE_API_VERSION = "7.6-preview.1"
+$AZURE_FUNCTION_NAME = "AkvStorageAccountConnector"
+
+$EXPECTED_FUNCTION_APP_SUBSCRIPTION_ID = $env:WEBSITE_OWNER_NAME.Substring(0, 36)
+$EXPECTED_FUNCTION_APP_RG_NAME = $env:WEBSITE_RESOURCE_GROUP
+$EXPECTED_FUNCTION_APP_NAME = $env:WEBSITE_SITE_NAME
+$EXPECTED_FUNCTION_RESOURCE_ID = "/subscriptions/$EXPECTED_FUNCTION_APP_SUBSCRIPTION_ID/resourceGroups/$EXPECTED_FUNCTION_APP_RG_NAME/providers/Microsoft.Web/sites/$EXPECTED_FUNCTION_APP_NAME/functions/$AZURE_FUNCTION_NAME"
 
 function Get-CredentialValue([string]$ActiveCredentialId, [string]$ProviderAddress) {
     if (-not ($ActiveCredentialId)) {
@@ -50,22 +56,25 @@ function Get-InactiveCredentialId([string]$ActiveCredentialId) {
     return $inactiveCredentialId
 }
 
-function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$UnversionedSecretId) {
-    $expectedLifecycleState = "ImportPending"
+function Get-CurrentSecret(
+    [string]$VersionedSecretId,
+    [string]$UnversionedSecretId,
+    [string]$ExpectedLifecycleState
+) {
+    $secret = $null
+    $actualSecretId = $null
+    $actualLifecycleState = $null
+
     $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
 
     # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
     # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
-    Write-Host "[Step 1] Get the current secret for validation and the ground truth."
-    $secret = $null
-    $actualSecretId = $null
-    $actualLifecycleState = $null
     foreach ($i in 1..$MAX_RETRY_ATTEMPTS) {
         $clientRequestId = [Guid]::NewGuid().ToString()
         Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
         $headers = @{
             "Authorization"          = "Bearer $token"
-            "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretImport; Step 1; Attempt $i)"
+            "User-Agent"             = "$AZURE_FUNCTION_NAME/1.0 (Invoke-PendingSecretImport; Step 1; Attempt $i)"
             "x-ms-client-request-id" = $clientRequestId
         }
         $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
@@ -75,7 +84,7 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
         $secret = $response.Content | ConvertFrom-Json
         $actualSecretId = $secret.id
         $actualLifecycleState = $secret.attributes.lifecycleState
-        if (($actualSecretId -eq $VersionedSecretId) -and ($actualLifecycleState -eq $expectedLifecycleState)) {
+        if (($actualSecretId -eq $VersionedSecretId) -and ($actualLifecycleState -eq $ExpectedLifecycleState)) {
             break
         }
         Start-Sleep -Seconds 1
@@ -83,8 +92,8 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
     if (-not ($actualSecretId -eq $VersionedSecretId)) {
         throw "The secret '$actualSecretId' did not transition to '$VersionedSecretId' after approximately $MAX_RETRY_ATTEMPTS seconds."
     }
-    if (-not ($actualLifecycleState -eq $expectedLifecycleState)) {
-        throw "The secret '$actualSecretId' still has a lifecycle state of '$actualLifecycleState' and did not transition to '$expectedLifecycleState' after approximately $MAX_RETRY_ATTEMPTS seconds."
+    if (-not ($actualLifecycleState -eq $ExpectedLifecycleState)) {
+        throw "The secret '$actualSecretId' still has a lifecycle state of '$actualLifecycleState' and did not transition to '$ExpectedLifecycleState' after approximately $MAX_RETRY_ATTEMPTS seconds."
     }
     $lifecycleDescription = $secret.attributes.lifecycleDescription
     $validityPeriod = $secret.rotationPolicy.validityPeriod
@@ -97,18 +106,33 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
     Write-Host "  providerAddress: '$providerAddress'"
     Write-Host "  functionResourceId: '$functionResourceId'"
 
-    Write-Host "[Step 2] Import the secret from the provider and prepare the new secret in-memory."
+    return $secret
+}
+
+function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$UnversionedSecretId) {
+    Write-Host "Step 1: Get the current secret for validation and the ground truth."
+    $secret = Get-CurrentSecret -VersionedSecretId $VersionedSecretId -UnversionedSecretId $UnversionedSecretId -ExpectedLifecycleState "ImportPending"
+    $actualFunctionResourceId = $secret.providerConfig.functionResourceId
+    if ($actualFunctionResourceId -ne $EXPECTED_FUNCTION_RESOURCE_ID) {
+        Write-Host "Expected function resource ID to be '$EXPECTED_FUNCTION_RESOURCE_ID', but found '$actualFunctionResourceId'. Exiting."
+        return
+    }
+
+    Write-Host "Step 2: Import the secret from the provider and prepare the new secret in-memory."
+    $activeCredentialId = $secret.providerConfig.activeCredentialId
+    $providerAddress = $secret.providerConfig.providerAddress
     $activeCredentialValue = Get-CredentialValue -ActiveCredentialId $activeCredentialId -ProviderAddress $providerAddress
     $secret | Add-Member -NotePropertyName "value" -NotePropertyValue $activeCredentialValue -Force
     $secret.providerConfig.activeCredentialId = $activeCredentialId
     $updatePendingSecretRequestBody = ConvertTo-Json $secret -Depth $MAX_JSON_DEPTH -Compress
 
-    Write-Host "[Step 3] Update the pending secret."
+    Write-Host "Step 3: Update the pending secret."
     $clientRequestId = [Guid]::NewGuid().ToString()
     Write-Host "  x-ms-client-request-id: '$clientRequestId'"
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
     $headers = @{
         "Authorization"          = "Bearer $token"
-        "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretImport; Step 3)"
+        "User-Agent"             = "$AZURE_FUNCTION_NAME/1.0 (Invoke-PendingSecretImport; Step 3)"
         "x-ms-client-request-id" = $clientRequestId
     }
     $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `
@@ -126,53 +150,17 @@ function Invoke-PendingSecretImport([string]$VersionedSecretId, [string]$Unversi
 }
 
 function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$UnversionedSecretId) {
-    $expectedLifecycleState = "RotationPending"
-    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
-
-    # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
-    # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
     Write-Host "Step 1: Get the current secret for validation and the ground truth."
-    $secret = $null
-    $actualSecretId = $null
-    $actualLifecycleState = $null
-    foreach ($i in 1..$MAX_RETRY_ATTEMPTS) {
-        $clientRequestId = [Guid]::NewGuid().ToString()
-        Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
-        $headers = @{
-            "Authorization"          = "Bearer $token"
-            "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretRotation; Step 1; Attempt $i)"
-            "x-ms-client-request-id" = $clientRequestId
-        }
-        $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
-            -Method "GET" `
-            -Headers $headers `
-            -ContentType "application/json"
-        $secret = $response.Content | ConvertFrom-Json
-        $actualSecretId = $secret.id
-        $actualLifecycleState = $secret.attributes.lifecycleState
-        if (($actualSecretId -eq $VersionedSecretId) -and ($actualLifecycleState -eq $expectedLifecycleState)) {
-            break
-        }
-        Start-Sleep -Seconds 1
+    $secret = Get-CurrentSecret -VersionedSecretId $VersionedSecretId -UnversionedSecretId $UnversionedSecretId -ExpectedLifecycleState "RotationPending"
+    $actualFunctionResourceId = $secret.providerConfig.functionResourceId
+    if ($actualFunctionResourceId -ne $EXPECTED_FUNCTION_RESOURCE_ID) {
+        Write-Host "Expected function resource ID to be '$EXPECTED_FUNCTION_RESOURCE_ID', but found '$actualFunctionResourceId'. Exiting."
+        return
     }
-    if (-not ($actualSecretId -eq $VersionedSecretId)) {
-        throw "The secret '$actualSecretId' did not transition to '$VersionedSecretId' after approximately $MAX_RETRY_ATTEMPTS seconds."
-    }
-    if (-not ($actualLifecycleState -eq $expectedLifecycleState)) {
-        throw "The secret '$actualSecretId' still has a lifecycle state of '$actualLifecycleState' and did not transition to '$expectedLifecycleState' after approximately $MAX_RETRY_ATTEMPTS seconds."
-    }
-    $lifecycleDescription = $secret.attributes.lifecycleDescription
-    $validityPeriod = $secret.rotationPolicy.validityPeriod
-    $activeCredentialId = $secret.providerConfig.activeCredentialId
-    $providerAddress = $secret.providerConfig.providerAddress
-    $functionResourceId = $secret.providerConfig.functionResourceId
-    Write-Host "  lifecycleDescription: '$lifecycleDescription'"
-    Write-Host "  validityPeriod: '$validityPeriod'"
-    Write-Host "  activeCredentialId: '$activeCredentialId'"
-    Write-Host "  providerAddress: '$providerAddress'"
-    Write-Host "  functionResourceId: '$functionResourceId'"
 
     Write-Host "Step 2: Regenerate the inactive credential via the provider and prepare the new secret in-memory."
+    $activeCredentialId = $secret.providerConfig.activeCredentialId
+    $providerAddress = $secret.providerConfig.providerAddress
     $inactiveCredentialId = Get-InactiveCredentialId -ActiveCredentialId $activeCredentialId
     $inactiveCredentialValue = Invoke-CredentialRegeneration -InactiveCredentialId $inactiveCredentialId -ProviderAddress $providerAddress
     $secret | Add-Member -NotePropertyName "value" -NotePropertyValue $inactiveCredentialValue -Force
@@ -182,9 +170,10 @@ function Invoke-PendingSecretRotation([string]$VersionedSecretId, [string]$Unver
     Write-Host "Step 3: Update the pending secret."
     $clientRequestId = [Guid]::NewGuid().ToString()
     Write-Host "  x-ms-client-request-id: '$clientRequestId'"
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
     $headers = @{
         "Authorization"          = "Bearer $token"
-        "User-Agent"             = "AkvStorageAccountConnector/1.0 (Invoke-PendingSecretRotation; Step 3)"
+        "User-Agent"             = "$AZURE_FUNCTION_NAME/1.0 (Invoke-PendingSecretRotation; Step 3)"
         "x-ms-client-request-id" = $clientRequestId
     }
     $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `
