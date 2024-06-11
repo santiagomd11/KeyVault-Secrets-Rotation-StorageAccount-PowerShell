@@ -179,9 +179,9 @@ function Update-PendingSecret(
     } catch {
         $httpStatusCode = $_.Exception.Response.StatusCode
         $httpStatusCodeDescription = "$([int]$httpStatusCode) ($httpStatusCode)"
-        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+        $errorBody = $_.ErrorDetails.Message | ConvertFrom-Json
         $requestUri = $_.Exception.Response.RequestMessage.RequestUri
-        $requestId = $_.Exception.Response.Headers["x-ms-request-id"]
+        $requestId = $_.Exception.Response.Headers.GetValues("x-ms-request-id") -join ","
         $errorCode = $errorBody.error.code
         $errorMessage = $errorBody.error.message
         Write-Host "  httpStatusCode: '$httpStatusCodeDescription'"
