@@ -179,11 +179,8 @@ function Update-PendingSecret(
     } catch {
         $httpStatusCode = $_.Exception.Response.StatusCode
         $httpStatusCodeDescription = "$([int]$httpStatusCode) ($httpStatusCode)"
-        $streamReader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-        $streamReader.BaseStream.Position = 0
-        $errorBody = $streamReader.ReadToEnd() | ConvertFrom-Json
-        $streamReader.Close()
-        $requestUri = $_.Exception.Response.ResponseUri
+        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+        $requestUri = $_.Exception.Response.RequestMessage.RequestUri
         $requestId = $_.Exception.Response.Headers["x-ms-request-id"]
         $errorCode = $errorBody.error.code
         $errorMessage = $errorBody.error.message
