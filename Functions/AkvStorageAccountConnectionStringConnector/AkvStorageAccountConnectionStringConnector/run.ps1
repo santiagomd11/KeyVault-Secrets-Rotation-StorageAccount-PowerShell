@@ -100,7 +100,7 @@ function Get-CurrentSecret(
     $actualLifecycleState = $null
     $actualFunctionResourceId = $null
 
-    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault -AsSecureString).Token
 
     # In rare cases, this handler might receive the published event before AKV has finished committing to storage.
     # To mitigate this, poll the current secret for up to 30s until its current lifecycle state matches that of the published event.
@@ -108,14 +108,15 @@ function Get-CurrentSecret(
         $clientRequestId = [Guid]::NewGuid().ToString()
         Write-Host "  Attempt #$i with x-ms-client-request-id: '$clientRequestId'"
         $headers = @{
-            "Authorization"          = "Bearer $token"
             "User-Agent"             = "$AZURE_FUNCTION_NAME/1.0 ($CallerName; Step 1; Attempt $i)"
             "x-ms-client-request-id" = $clientRequestId
         }
         $response = Invoke-WebRequest -Uri "${UnversionedSecretId}?api-version=$DATA_PLANE_API_VERSION" `
             -Method "GET" `
-            -Headers $headers `
-            -ContentType "application/json"
+            -Authentication OAuth `
+            -Token $token `
+            -ContentType "application/json" `
+            -Headers $headers
         $secret = $response.Content | ConvertFrom-Json
         $actualSecretId = $secret.id
         $actualLifecycleState = $secret.attributes.lifecycleState
@@ -158,17 +159,18 @@ function Update-PendingSecret(
     [string]$CallerName) {
     $clientRequestId = [Guid]::NewGuid().ToString()
     Write-Host "  x-ms-client-request-id: '$clientRequestId'"
-    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault -AsSecureString).Token
     $headers = @{
-        "Authorization"          = "Bearer $token"
         "User-Agent"             = "$AZURE_FUNCTION_NAME/1.0 ($CallerName; Step 3)"
         "x-ms-client-request-id" = $clientRequestId
     }
     try {
         $response = Invoke-WebRequest -Uri "${UnversionedSecretId}/pending?api-version=$DATA_PLANE_API_VERSION" `
             -Method "PUT" `
-            -Headers $headers `
+            -Authentication OAuth `
+            -Token $token `
             -ContentType "application/json" `
+            -Headers $headers `
             -Body $UpdatePendingSecretRequestBody
         $updatedSecret = $response.Content | ConvertFrom-Json
         $lifecycleState = $updatedSecret.attributes.lifecycleState
