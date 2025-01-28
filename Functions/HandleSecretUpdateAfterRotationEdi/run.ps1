@@ -3,7 +3,7 @@ param([object]$EventGridEvent, [object]$TriggerMetadata)
 $AZURE_FUNCTION_NAME = "HandleSecretUpdateAfterRotation"
 $DATA_PLANE_API_VERSION = "7.6-preview.1"
 $EXPECTED_FUNCTION_APP_RG_NAME = $env:WEBSITE_RESOURCE_GROUP
-$EXPECTED_FUNCTION_APP_NAME = "$EXPECTED_FUNCTION_APP_RG_NAME-App"
+$EXPECTED_FUNCTION_APP_NAME = "Edi-Staging-App"
 $storageAccountName = $env:STORAGE_ACCOUNT_NAME
 Write-Host "Storage Account Name: $storageAccountName"
 
@@ -26,27 +26,60 @@ function Get-SecretValue([string]$SecretId) {
         -Token $token `
         -ContentType "application/json" `
         -Headers $headers
-    return $response.value
+    
+    $secret = $response.Content | ConvertFrom-Json
+    $secretValue = $secret.value
+
+    return $secretValue
 }
 
 function Update-FunctionAppSettings([string]$SecretValue) {
-    Write-Host "Updating Function App settings with the new secret value..."
-
     $functionAppName = $EXPECTED_FUNCTION_APP_NAME
     $resourceGroupName = $EXPECTED_FUNCTION_APP_RG_NAME
 
-    $appSettings = @{
-        "AzureWebJobsDashboard" = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$secretValue;"
-        "AzureWebJobsStorage" = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$secretValue;"
-        "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING" = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$secretValue;"
+    $token = (Get-AzAccessToken -ResourceTypeName "Arm").Token
+    $headers = @{
+        "Authorization" = "Bearer $token"
+        "Content-Type"  = "application/json"
     }
 
-    foreach ($key in $appSettings.Keys) {
-        Write-Host "Setting $key = $($appSettings[$key])"
+    $getUrl = "https://management.azure.com/subscriptions/$env:AZURE_SUBSCRIPTION_ID/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$functionAppName/config/appsettings/list?api-version=2023-12-01"
+
+
+    Write-Host "Fetching current app settings..."
+
+    $currentSettingsResponse = Invoke-WebRequest -Uri $getUrl -Method "POST" -Headers $headers
+    $currentSettingsObject = ($currentSettingsResponse.Content | ConvertFrom-Json).properties
+
+    $currentSettings = @{}
+    foreach ($key in $currentSettingsObject.PSObject.Properties.Name) {
+        $currentSettings[$key] = $currentSettingsObject.$key
     }
 
+    Write-Host "Merge new settings with existing settings..."
+
+    $newSettings = @{
+        "AzureWebJobsDashboard" = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$SecretValue;"
+        "AzureWebJobsStorage" = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$SecretValue;"
+        "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING" = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$SecretValue;"
+    }
+
+    foreach ($key in $newSettings.Keys) {
+        $currentSettings[$key] = $newSettings[$key]
+    }
+
+    $body = @{
+        "properties" = $currentSettings
+    } | ConvertTo-Json
+
+    $updateUrl = "https://management.azure.com/subscriptions/$env:AZURE_SUBSCRIPTION_ID/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$functionAppName/config/appsettings?api-version=2023-12-01"
+
+    Write-Host "Sending update request to Azure with merged settings..."
     try {
-        Update-AzFunctionAppSetting -Name $functionAppName -ResourceGroupName $resourceGroupName -AppSetting $appSettings -Force
+        $response = Invoke-WebRequest -Uri $updateUrl `
+            -Method "PUT" `
+            -Headers $headers `
+            -Body $body
         Write-Host "Function App settings updated successfully."
     } catch {
         Write-Error "Failed to update Function App settings: $_"
@@ -63,6 +96,8 @@ if ($eventType -eq "Microsoft.KeyVault.SecretNewVersionCreated") {
     Write-Host "New secret version detected: $secretId"
 
     $secretValue = Get-SecretValue -SecretId $secretId
+    Write-Host "Secret for $SecretId got successfully."
+
     Update-FunctionAppSettings -SecretValue $secretValue
 } else {
     Write-Error "Unsupported Event Type: $eventType"
