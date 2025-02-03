@@ -3,7 +3,7 @@ param([object]$EventGridEvent, [object]$TriggerMetadata)
 $AZURE_FUNCTION_NAME = "HandleSecretUpdateAfterRotation"
 $DATA_PLANE_API_VERSION = "7.6-preview.1"
 $EXPECTED_FUNCTION_APP_RG_NAME = $env:WEBSITE_RESOURCE_GROUP
-$EXPECTED_FUNCTION_APP_NAME = "Edi-Staging-App"
+$EXPECTED_FUNCTION_APP_NAME = $env:FUNCTION_APP_TO_UPDATE
 $storageAccountName = $env:STORAGE_ACCOUNT_NAME
 Write-Host "Storage Account Name: $storageAccountName"
 
