@@ -8,6 +8,10 @@ $storageAccountName = $env:STORAGE_ACCOUNT_NAME
 $SqlServerName = $env:SQL_SERVER_NAME
 Write-Host "Storage Account Name: $storageAccountName"
 
+# To update secret in KeyVault
+$keyVaultName = $env:KEY_VAULT_NAME
+$secretName = $env:KEY_VAULT_SECRET_NAME
+
 function Get-SecretValue([string]$SecretId) {
     Write-Host "Fetching secret value for SecretId: $SecretId"
 
@@ -176,6 +180,35 @@ function Update-SqlServerVulnerabilityAssessmentsSettings([string]$SecretValue) 
     Write-Host "SQL Server vulnerability assessments settings updated successfully."
 }
 
+function Update-KeyVault-SecretByName([string]$VaultName, [string]$SecretName, [string]$SecretValue) {
+    Write-Host "Updating Key Vault secret '$SecretName' in vault '$VaultName' with new value..."
+
+    $token = (Get-AzAccessToken -ResourceTypeName KeyVault).Token
+    $headers = @{
+        "Authorization" = "Bearer $token"
+        "Content-Type"  = "application/json"
+    }
+
+    $updateUrl = "https://$VaultName.vault.azure.net/secrets/$SecretName`?api-version=$DATA_PLANE_API_VERSION"
+    
+    Write-Host "Request URL: $updateUrl"
+
+    $body = @{
+        "value" = $SecretValue
+    } | ConvertTo-Json
+
+    try {
+        $response = Invoke-WebRequest -Uri $updateUrl `
+            -Method "PUT" `
+            -Headers $headers `
+            -Body $body
+        Write-Host "Key Vault secret updated successfully."
+    } catch {
+        Write-Error "Failed to update Key Vault secret: $_"
+        throw $_
+    }
+}
+
 
 Write-Host "Processing Event Grid event..."
 $eventType = $EventGridEvent.eventType
@@ -192,6 +225,10 @@ if ($eventType -eq "Microsoft.KeyVault.SecretNewVersionCreated") {
     Update-SqlServerAuditingSettings -SecretValue $secretValue
 
     Update-SqlServerVulnerabilityAssessmentsSettings -SecretValue $secretValue
+
+    # Update connection string on key vault
+    $connectionString = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$secretValue;EndpointSuffix=core.windows.net"
+    Update-KeyVault-SecretByName -VaultName $keyVaultName -SecretName $secretName -SecretValue $connectionString
 } else {
     Write-Error "Unsupported Event Type: $eventType"
     throw "The Event Grid event '$eventType' is unsupported. Expected 'Microsoft.KeyVault.SecretNewVersionCreated'."
